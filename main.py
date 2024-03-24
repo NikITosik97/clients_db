@@ -2,20 +2,22 @@ import psycopg2
 
 
 class ClientsData:
-    conn = psycopg2.connect(database='clientsdata',
-                            user='postgres',
-                            password='postgres')
+    def connection_db(self):
+        with psycopg2.connect(database='clientsdata',
+                              user='postgres',
+                              password='postgres') as conn_:
+            return conn_
 
-    def drop_all_db(self):
-        with self.conn.cursor() as cur:
+    def drop_all_db(self, conn_):
+        with conn_.cursor() as cur:
             cur.execute("""
                 DROP TABLE phone_numbers;
                 DROP TABLE clients;
             """)
-        self.conn.commit()
+        conn_.commit()
 
-    def create_table(self):
-        with self.conn.cursor() as cur:
+    def create_table(self, conn_):
+        with conn_.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS clients(
                     client_id SERIAL PRIMARY KEY,
@@ -30,10 +32,10 @@ class ClientsData:
                     phone_number varchar(60)
                 )
             """)
-            self.conn.commit()
+            conn_.commit()
 
-    def add_client(self, first_name: str, last_name: str, email: str):
-        with self.conn.cursor() as cur:
+    def add_client(self, conn_, first_name: str, last_name: str, email: str):
+        with conn_.cursor() as cur:
             cur.execute("""
                 SELECT first_name, last_name, email
                 FROM clients
@@ -41,7 +43,7 @@ class ClientsData:
             """, (first_name, last_name, email))
             client = cur.fetchall()
         if len(client) < 1:
-            with self.conn.cursor() as cur:
+            with conn_.cursor() as cur:
                 cur.execute("""
                     INSERT INTO clients(
                         first_name,
@@ -51,23 +53,17 @@ class ClientsData:
                     VALUES(%s, %s, %s)
                 """, (first_name, last_name, email))
 
-            self.conn.commit()
+            conn_.commit()
 
-    def add_phone_number_for_client(self, client_id: int, number_phone=None):
-        with self.conn.cursor() as cur:
+    def add_phone_number_for_client(self, conn_, client_id: int, number_phone=None):
+        with conn_.cursor() as cur:
             cur.execute("""
                 SELECT phone_number
                 FROM phone_numbers
             """)
             numbers: list[()] = cur.fetchall()
 
-            if len(numbers) > 0 and numbers[0][0] is None:
-                cur.execute("""
-                    UPDATE phone_numbers
-                    SET phone_number = %s
-                    WHERE client_id = %s
-                """, (number_phone, client_id))
-            else:
+            if len(numbers) < 1:
                 cur.execute("""
                     INSERT INTO phone_numbers(
                         client_id,
@@ -75,65 +71,79 @@ class ClientsData:
                     )
                     VALUES(%s, %s)
                 """, (client_id, number_phone))
-        self.conn.commit()
+            else:
+                set_numbers = set()
+                for number in numbers:
+                    set_numbers.add(*number)
 
-    def alter_data_for_client(self, client_id, **kwargs):
+                if number_phone not in set_numbers:
+                    cur.execute("""
+                        INSERT INTO phone_numbers(
+                            client_id,
+                            phone_number
+                        )
+                        VALUES(%s, %s)
+                    """, (client_id, number_phone))
+
+        conn_.commit()
+
+    def alter_data_for_client(self, conn_, client_id, **kwargs):
         for key, val in kwargs.items():
             match key:
                 case 'first_name':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             UPDATE clients
                             SET first_name = %s
                             WHERE client_id = %s    
                         """, (val, client_id)
                                     )
-                        self.conn.commit()
+                        conn_.commit()
 
                 case 'last_name':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             UPDATE clients
                             SET last_name = %s
                             WHERE client_id = %s    
                         """, (val, client_id)
                                     )
-                        self.conn.commit()
+                        conn_.commit()
 
                 case 'email':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             UPDATE clients
                             SET email = %s
                             WHERE client_id = %s    
                         """, (val, client_id)
                                     )
-                        self.conn.commit()
+                        conn_.commit()
 
                 case 'phone_number':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             UPDATE phone_numbers
                             SET phone_number = %s
                             WHERE client_id = %s    
                         """, (val, client_id)
                                     )
-                        self.conn.commit()
+                        conn_.commit()
 
-    def delete_phone_client(self, *args):
+    def delete_phone_client(self, conn_, *args):
         if len(args) >= 1:
             for number in args:
-                with self.conn.cursor() as cur:
+                with conn_.cursor() as cur:
                     cur.execute("""
                         DELETE FROM phone_numbers
                         WHERE phone_number = %s
                     """, (number,)
                                 )
-                    self.conn.commit()
+                    conn_.commit()
 
-    def delete_client(self, *client_id):
+    def delete_client(self, conn_, *client_id):
 
-        with self.conn.cursor() as cur:
+        with conn_.cursor() as cur:
             cur.execute("""
                 SELECT phone_number
                 FROM phone_numbers
@@ -141,22 +151,22 @@ class ClientsData:
             numbers = cur.fetchall()
             if len(numbers) < 1:
                 for id_ in client_id:
-                    with self.conn.cursor() as cur1:
-                        cur1.execute("""
+                    with conn_.cursor() as cur:
+                        cur.execute("""
                             DELETE FROM clients
                             WHERE client_id = %s
                         """, (id_,)
-                                     )
-                        self.conn.commit()
+                                    )
+                        conn_.commit()
             else:
                 self.delete_phone_client(numbers)
-                with self.conn.cursor() as cur2:
-                    cur2.execute("""
+                with conn_.cursor() as cur:
+                    cur.execute("""
                         DELETE FROM clients
                         WHERE client_id = %s
                     """, client_id
-                                 )
-                self.conn.commit()
+                                )
+                conn_.commit()
 
     def show_client_data(self, *args):
 
@@ -194,11 +204,11 @@ class ClientsData:
                                 })
         return client_data
 
-    def find_client_by_data(self, **kwargs):
+    def find_client_by_data(self, conn_, **kwargs):
         for key, val in kwargs.items():
             match key:
                 case 'client_id':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                                 SELECT client_id, first_name, last_name, email, phone_number
                                 FROM clients
@@ -207,10 +217,10 @@ class ClientsData:
                             """, (val,)
                                     )
                         print(self.show_client_data(*cur.fetchall()))
-                        self.conn.commit()
+                        conn_.commit()
 
                 case 'first_name':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             SELECT client_id, first_name, last_name, email, phone_number
                             FROM clients
@@ -219,10 +229,10 @@ class ClientsData:
                         """, (val,)
                                     )
                         print(self.show_client_data(*cur.fetchall()))
-                        self.conn.commit()
+                        conn_.commit()
 
                 case 'last_name':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             SELECT client_id, first_name, last_name, email, phone_number
                             FROM clients
@@ -231,10 +241,10 @@ class ClientsData:
                         """, (val,)
                                     )
                         print(self.show_client_data(*cur.fetchall()))
-                        self.conn.commit()
+                        conn_.commit()
 
                 case 'email':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             SELECT client_id, first_name, last_name, email, phone_number
                             FROM clients
@@ -243,10 +253,10 @@ class ClientsData:
                         """, (val,)
                                     )
                         print(self.show_client_data(*cur.fetchall()))
-                        self.conn.commit()
+                        conn_.commit()
 
                 case 'phone_number':
-                    with self.conn.cursor() as cur:
+                    with conn_.cursor() as cur:
                         cur.execute("""
                             SELECT client_id, first_name, last_name, email, phone_number
                             FROM clients
@@ -255,9 +265,11 @@ class ClientsData:
                         """, (val,)
                                     )
                         print(self.show_client_data(*cur.fetchall()))
-                        self.conn.commit()
+                        conn_.commit()
 
 
-clients_data = ClientsData()
-clients_data.drop_all_db()
-clients_data.create_table()
+if __name__ == '__main__':
+    clients_data = ClientsData()
+    conn = clients_data.connection_db()
+    clients_data.drop_all_db(conn)
+    clients_data.create_table(conn)
